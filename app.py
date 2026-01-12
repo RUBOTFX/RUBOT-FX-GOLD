@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import time
 import pandas as pd
+import requests
 
 # --- CONFIGURATION ---
 st.set_page_config(
@@ -20,40 +21,45 @@ BARRIER_RANGES = [
     (3651.000, 3671.000)
 ]
 PIP_TRIGGER = 2.00
-SYMBOL = "XAUUSD=X" 
+SYMBOL = "XAUUSD=X" # <--- BACK TO SPOT GOLD
 
 # --- CUSTOM UI STYLING ---
 st.markdown("""
     <style>
-    .stApp { background-color: #0E1117; color: white; }
+    .stApp { background-color: #121212; color: white; }
     .big-price {
-        font-size: 60px !important; font-weight: bold;
+        font-size: 70px !important; font-weight: 800;
         color: #FFD700; text-align: center;
-        font-family: 'Courier New', Courier, monospace;
-        text-shadow: 0px 0px 10px #B8860B;
+        text-shadow: 0px 0px 15px rgba(255, 215, 0, 0.5);
+        margin-bottom: 10px;
     }
     .signal-box {
-        padding: 20px; border-radius: 10px;
-        text-align: center; font-size: 24px; font-weight: bold;
-        margin-bottom: 20px; border: 2px solid #333;
+        padding: 25px; border-radius: 12px;
+        text-align: center; font-size: 22px; font-weight: bold;
+        margin-bottom: 20px; border: 1px solid #333;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
-    .status-msg {
-        text-align: center; color: #888; font-size: 14px;
-    }
-    .stTable { font-size: 18px; }
+    .stTable { font-size: 16px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTION: GET SPOT PRICE ---
-def get_spot_gold():
+# --- ADVANCED DATA FETCHING (ANTI-BLOCK) ---
+def get_gold_price():
     try:
-        # Fetch data with error handling
-        ticker = yf.Ticker(SYMBOL)
+        # 1. Fake a Browser Visit (To bypass Yahoo Blocks on Spot Gold)
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        
+        # 2. Fetch Data using the Fake Session
+        ticker = yf.Ticker(SYMBOL, session=session)
         df = ticker.history(period="1d", interval="1m")
+        
         if not df.empty:
             return float(df['Close'].iloc[-1])
         return None
-    except Exception as e:
+    except Exception:
         return None
 
 # --- SESSION STATE ---
@@ -64,23 +70,21 @@ if 'buy_active' not in st.session_state: st.session_state.buy_active = False
 
 # --- MAIN APP LAYOUT ---
 st.title("👑 Spot Gold Sniper (XAU/USD)")
-st.caption("Data Source: Yahoo Finance Spot Rate (Free/Unlimited)")
+st.caption(f"Tracking: {SYMBOL} | Source: Yahoo Finance Spot")
 
-# UI Placeholders
 price_placeholder = st.empty()
 signal_placeholder = st.empty()
 barriers_placeholder = st.empty()
-debug_placeholder = st.empty() # New debug area
+status_placeholder = st.empty()
 
 # --- MAIN LOOP ---
 while True:
-    price = get_spot_gold()
+    price = get_gold_price()
     
     if price:
-        # CLEAR DEBUG MESSAGE
-        debug_placeholder.empty()
+        status_placeholder.empty() # Clear loading message
 
-        # 1. IDENTIFY BARRIERS
+        # 1. BARRIER LOGIC
         active_res = None
         active_sup = None
         
@@ -92,16 +96,16 @@ while True:
         if potential_supports:
             active_sup = max(potential_supports, key=lambda x: x[0])
 
-        # 2. UPDATE PRICE DISPLAY
+        # 2. RENDER PRICE
         with price_placeholder.container():
             st.markdown(f'<div class="big-price">${price:.2f}</div>', unsafe_allow_html=True)
 
-        # 3. STRATEGY LOGIC
-        status_msg = "SCANNING CHART..."
-        box_color = "#262730"
-        text_color = "#aaaaaa"
+        # 3. SIGNAL LOGIC
+        status_msg = "SCANNING MARKET..."
+        box_color = "#2a2a2a"
+        text_color = "#888888"
 
-        # SELL LOGIC
+        # SELL SIDE
         if active_res:
             if active_res != st.session_state.last_res:
                 st.session_state.sell_active = False
@@ -115,19 +119,19 @@ while True:
                 elif price < active_res[0]:
                     drop = active_res[0] - price
                     if drop >= PIP_TRIGGER:
-                        status_msg = f"🚨 SELL SIGNAL 🚨<br>FAILED RETEST<br>Drop: ${drop:.2f}"
+                        status_msg = f"🚨 SELL SIGNAL 🚨<br>REJECTION CONFIRMED<br>Drop: {drop:.2f} pts"
                         box_color = "#8B0000"
                         text_color = "white"
                     else:
-                        status_msg = f"📉 SELL SETUP<br>Retesting Resistance...<br>Drop: ${drop:.2f}"
+                        status_msg = f"📉 SELL WATCH<br>Retesting Zone...<br>Drop: {drop:.2f} pts"
                         box_color = "#5c0000"
                         text_color = "white"
                 else:
-                    status_msg = "⚠️ TESTING RESISTANCE ZONE"
+                    status_msg = "⚠️ IN RESISTANCE ZONE"
                     box_color = "#B8860B"
                     text_color = "black"
 
-        # BUY LOGIC
+        # BUY SIDE
         if active_sup:
             if active_sup != st.session_state.last_sup:
                 st.session_state.buy_active = False
@@ -141,16 +145,16 @@ while True:
                 elif price > active_sup[1]:
                     rise = price - active_sup[1]
                     if rise >= PIP_TRIGGER:
-                        status_msg = f"🚀 BUY SIGNAL 🚀<br>SUCCESSFUL RETEST<br>Bounce: ${rise:.2f}"
+                        status_msg = f"🚀 BUY SIGNAL 🚀<br>BOUNCE CONFIRMED<br>Rise: {rise:.2f} pts"
                         box_color = "#006400"
                         text_color = "white"
                     else:
-                        status_msg = f"📈 BUY SETUP<br>Retesting Support...<br>Bounce: ${rise:.2f}"
+                        status_msg = f"📈 BUY WATCH<br>Retesting Zone...<br>Rise: {rise:.2f} pts"
                         box_color = "#004d00"
                         text_color = "white"
                 else:
                     if "SELL" not in status_msg:
-                        status_msg = "⚠️ TESTING SUPPORT ZONE"
+                        status_msg = "⚠️ IN SUPPORT ZONE"
                         box_color = "#B8860B"
                         text_color = "black"
 
@@ -162,22 +166,22 @@ while True:
                 </div>
             """, unsafe_allow_html=True)
 
-        # 5. RENDER BARRIER LIST
+        # 5. RENDER TABLE
         data = []
         sorted_barriers = sorted(BARRIER_RANGES, key=lambda x: x[0], reverse=True)
         for r in sorted_barriers:
             status = ""
             if r == active_res: status = "🔴 RESISTANCE"
             elif r == active_sup: status = "🟢 SUPPORT"
-            elif r[0] <= price <= r[1]: status = "🟡 INSIDE ZONE"
-            data.append({"Lower": f"{r[0]:.3f}", "Upper": f"{r[1]:.3f}", "Status": status})
+            elif r[0] <= price <= r[1]: status = "🟡 INSIDE"
+            data.append({"Lower": f"{r[0]:.3f}", "Upper": f"{r[1]:.3f}", "Type": status})
 
         with barriers_placeholder.container():
             st.table(pd.DataFrame(data))
-    
-    else:
-        # DATA FETCH FAILED - SHOW LOADING MESSAGE
-        with debug_placeholder.container():
-            st.warning("⚠️ Connecting to Yahoo Finance... (Retrying in 5s)")
             
-    time.sleep(5)
+    else:
+        # STILL CONNECTING
+        with status_placeholder.container():
+            st.warning("⚠️ Connecting to Yahoo Spot Price... (Trying Anti-Block Bypass)")
+            
+    time.sleep(10)
