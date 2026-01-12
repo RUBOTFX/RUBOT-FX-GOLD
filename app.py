@@ -20,7 +20,7 @@ BARRIER_RANGES = [
     (3651.000, 3671.000)
 ]
 PIP_TRIGGER = 2.00
-SYMBOL = "XAUUSD=X" # Correct Spot Gold Ticker
+SYMBOL = "XAUUSD=X" 
 
 # --- CUSTOM UI STYLING ---
 st.markdown("""
@@ -37,6 +37,9 @@ st.markdown("""
         text-align: center; font-size: 24px; font-weight: bold;
         margin-bottom: 20px; border: 2px solid #333;
     }
+    .status-msg {
+        text-align: center; color: #888; font-size: 14px;
+    }
     .stTable { font-size: 18px; }
     </style>
     """, unsafe_allow_html=True)
@@ -44,15 +47,13 @@ st.markdown("""
 # --- FUNCTION: GET SPOT PRICE ---
 def get_spot_gold():
     try:
-        # Fetch standard 1-minute data for the Spot Ticker
+        # Fetch data with error handling
         ticker = yf.Ticker(SYMBOL)
         df = ticker.history(period="1d", interval="1m")
-        
         if not df.empty:
-            # Return the most recent 'Close' price
             return float(df['Close'].iloc[-1])
         return None
-    except:
+    except Exception as e:
         return None
 
 # --- SESSION STATE ---
@@ -61,28 +62,32 @@ if 'last_sup' not in st.session_state: st.session_state.last_sup = None
 if 'sell_active' not in st.session_state: st.session_state.sell_active = False
 if 'buy_active' not in st.session_state: st.session_state.buy_active = False
 
-# --- MAIN APP ---
+# --- MAIN APP LAYOUT ---
 st.title("👑 Spot Gold Sniper (XAU/USD)")
 st.caption("Data Source: Yahoo Finance Spot Rate (Free/Unlimited)")
 
+# UI Placeholders
 price_placeholder = st.empty()
 signal_placeholder = st.empty()
 barriers_placeholder = st.empty()
+debug_placeholder = st.empty() # New debug area
 
+# --- MAIN LOOP ---
 while True:
     price = get_spot_gold()
     
     if price:
+        # CLEAR DEBUG MESSAGE
+        debug_placeholder.empty()
+
         # 1. IDENTIFY BARRIERS
         active_res = None
         active_sup = None
         
-        # Closest Resistance (Above Price)
         potential_resistances = [r for r in BARRIER_RANGES if r[0] > price]
         if potential_resistances:
             active_res = min(potential_resistances, key=lambda x: x[0])
 
-        # Closest Support (Below Price)
         potential_supports = [r for r in BARRIER_RANGES if r[1] < price]
         if potential_supports:
             active_sup = max(potential_supports, key=lambda x: x[0])
@@ -96,54 +101,52 @@ while True:
         box_color = "#262730"
         text_color = "#aaaaaa"
 
-        # === SELL LOGIC ===
+        # SELL LOGIC
         if active_res:
             if active_res != st.session_state.last_res:
                 st.session_state.sell_active = False
                 st.session_state.last_res = active_res
             
-            # Entry: Touch Bottom of Resistance
             if price >= active_res[0]: st.session_state.sell_active = True
             
             if st.session_state.sell_active:
                 if price > active_res[1]:
-                    st.session_state.sell_active = False # Failed (Broke Top)
+                    st.session_state.sell_active = False
                 elif price < active_res[0]:
                     drop = active_res[0] - price
                     if drop >= PIP_TRIGGER:
                         status_msg = f"🚨 SELL SIGNAL 🚨<br>FAILED RETEST<br>Drop: ${drop:.2f}"
-                        box_color = "#8B0000" # Deep Red
+                        box_color = "#8B0000"
                         text_color = "white"
                     else:
                         status_msg = f"📉 SELL SETUP<br>Retesting Resistance...<br>Drop: ${drop:.2f}"
-                        box_color = "#5c0000" # Dim Red
+                        box_color = "#5c0000"
                         text_color = "white"
                 else:
                     status_msg = "⚠️ TESTING RESISTANCE ZONE"
-                    box_color = "#B8860B" # Gold
+                    box_color = "#B8860B"
                     text_color = "black"
 
-        # === BUY LOGIC ===
+        # BUY LOGIC
         if active_sup:
             if active_sup != st.session_state.last_sup:
                 st.session_state.buy_active = False
                 st.session_state.last_sup = active_sup
             
-            # Entry: Touch Top of Support
             if price <= active_sup[1]: st.session_state.buy_active = True
             
             if st.session_state.buy_active:
                 if price < active_sup[0]:
-                    st.session_state.buy_active = False # Failed (Broke Bottom)
+                    st.session_state.buy_active = False
                 elif price > active_sup[1]:
                     rise = price - active_sup[1]
                     if rise >= PIP_TRIGGER:
                         status_msg = f"🚀 BUY SIGNAL 🚀<br>SUCCESSFUL RETEST<br>Bounce: ${rise:.2f}"
-                        box_color = "#006400" # Deep Green
+                        box_color = "#006400"
                         text_color = "white"
                     else:
                         status_msg = f"📈 BUY SETUP<br>Retesting Support...<br>Bounce: ${rise:.2f}"
-                        box_color = "#004d00" # Dim Green
+                        box_color = "#004d00"
                         text_color = "white"
                 else:
                     if "SELL" not in status_msg:
@@ -172,5 +175,9 @@ while True:
         with barriers_placeholder.container():
             st.table(pd.DataFrame(data))
     
-    # 5-second polling for Yahoo Finance (Safe speed)
+    else:
+        # DATA FETCH FAILED - SHOW LOADING MESSAGE
+        with debug_placeholder.container():
+            st.warning("⚠️ Connecting to Yahoo Finance... (Retrying in 5s)")
+            
     time.sleep(5)
